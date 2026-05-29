@@ -23,6 +23,7 @@ export interface ChunkRecord {
   score: number;
   artifacts: string[];
   features?: AudioFeatures;
+  detectionMethod?: string;
 }
 
 export interface UseSimulationReturn {

@@ -2,7 +2,6 @@
 
 > **Real-time, dual-layer forensic audio deepfake detection engine.**
 
-![CallSaathi Interface](https://img.shields.io/badge/Status-Hackathon_Ready-success?style=for-the-badge)
 ![Next.js](https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue?style=for-the-badge&logo=typescript)
 

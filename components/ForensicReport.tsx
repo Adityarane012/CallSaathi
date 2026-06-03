@@ -12,6 +12,7 @@ interface ForensicReportProps {
     totalDuration: number;
     chunksAnalyzed: number;
     peakScore: number;
+    weightedScore?: number;
     suspiciousChunks: number;
     uniqueArtifacts: number;
     verdict: string;
@@ -26,14 +27,21 @@ export default function ForensicReport({ reportData }: ForensicReportProps) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
 
-  const isHighRisk = reportData.verdict.includes("HIGH") || reportData.verdict.includes("CRITICAL");
-  const badgeColor = isHighRisk ? "#ff2244" : "#ffaa00";
+  // Dynamic color coding based on verdict risk level
+  const badgeColor = reportData.verdict.includes("CRITICAL")
+    ? "#ff2244"
+    : reportData.verdict.includes("HIGH")
+      ? "#ff5566"
+      : reportData.verdict.includes("SUSPICIOUS")
+        ? "#ffaa00"
+        : "#00ff88";
 
   const handleCopy = () => {
     navigator.clipboard.writeText(
       `CALLSAATHI FORENSIC ANALYSIS REPORT\n` +
       `Call ID: ${reportData.callId} | Duration: ${reportData.totalDuration}s\n` +
-      `Verdict: ${reportData.verdict}\n\n` +
+      `Verdict: ${reportData.verdict}\n` +
+      `Overall Risk Score: ${reportData.weightedScore ?? 0}% | Peak Score: ${reportData.peakScore}%\n\n` +
       `${reportData.reportBody}`
     );
     setCopied(true);
@@ -73,7 +81,7 @@ export default function ForensicReport({ reportData }: ForensicReportProps) {
       <div className="p-6 md:p-8">
         {/* ── Metadata Row ───────────────────────────── */}
         <div
-          className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 text-xs md:text-sm"
+          className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8 text-xs md:text-sm"
           style={{
             fontFamily: "var(--font-jetbrains), monospace",
             color: "var(--text-secondary)",
@@ -90,6 +98,10 @@ export default function ForensicReport({ reportData }: ForensicReportProps) {
           <div>
             <div className="opacity-60 mb-1">CHUNKS ANALYZED</div>
             <div style={{ color: "var(--text-primary)" }}>{reportData.chunksAnalyzed}</div>
+          </div>
+          <div>
+            <div className="opacity-60 mb-1">OVERALL RISK SCORE</div>
+            <div style={{ color: badgeColor, fontWeight: "bold" }}>{reportData.weightedScore ?? 0}%</div>
           </div>
           <div>
             <div className="opacity-60 mb-1">PEAK SCORE</div>
@@ -134,6 +146,10 @@ export default function ForensicReport({ reportData }: ForensicReportProps) {
             color: "var(--text-secondary)",
           }}
         >
+          <div className="flex items-center gap-2">
+            <span className="opacity-60">Overall Risk:</span>
+            <span style={{ color: badgeColor, fontWeight: "bold" }}>{reportData.weightedScore ?? 0}%</span>
+          </div>
           <div className="flex items-center gap-2">
             <span className="opacity-60">Peak Risk:</span>
             <span style={{ color: "var(--state-danger)" }}>{reportData.peakScore}%</span>
@@ -206,7 +222,7 @@ export default function ForensicReport({ reportData }: ForensicReportProps) {
             className="text-center text-xs opacity-40 mt-8" 
             style={{ fontFamily: "var(--font-jetbrains), monospace" }}
           >
-            {reportData.detectionMethods?.includes('huggingface') && <div>Detection: Real ML model (HuggingFace mo-tts/audio-deepfake-detection)</div>}
+            {reportData.detectionMethods?.includes('huggingface') && <div>Detection: Real ML model (HuggingFace garystafford/wav2vec2-deepfake-voice-detector)</div>}
             {reportData.detectionMethods?.includes('groq') && <div>Detection: Feature-based analysis (Groq LLM)</div>}
             {reportData.detectionMethods?.includes('demo') && <div>Detection: Demo mode (simulated)</div>}
           </div>

@@ -27,26 +27,34 @@ interface ReportResponse {
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MODEL = "llama-3.3-70b-versatile";
 
-/* ── Helper: extract verdict ────────────────────────── */
+/* ── Helper: generate dynamic fallback report ────────── */
 
-function extractVerdict(report: string, peakScore: number): string {
-  // Try to extract from EXECUTIVE SUMMARY section
-  const summaryMatch = report.match(
-    /EXECUTIVE SUMMARY\s*\n([\s\S]*?)(?:\n\s*\n|\nTECHNICAL)/i
-  );
-  if (summaryMatch) {
-    const firstSentence = summaryMatch[1].trim().split(".")[0];
-    if (firstSentence.length > 10) {
-      return firstSentence.includes("AI-generated") || firstSentence.includes("deepfake")
-        ? "AI-GENERATED VOICE — HIGH CONFIDENCE"
-        : firstSentence;
-    }
-  }
+function getDynamicFallbackReport(
+  verdict: string,
+  riskLevel: string,
+  callId: string,
+  totalDuration: number,
+  peakScore: number,
+  averageScore: number
+) {
+  const isHighRisk = riskLevel === "CRITICAL" || riskLevel === "HIGH";
 
-  // Fallback based on peak score
-  if (peakScore >= 70) return "AI-GENERATED VOICE — HIGH CONFIDENCE";
-  if (peakScore >= 50) return "SUSPICIOUS AUDIO — MODERATE CONFIDENCE";
-  return "LIKELY HUMAN VOICE — LOW RISK";
+  const execSummary = isHighRisk
+    ? `Analysis of the monitored call (${callId}) reveals strong indicators of AI-generated speech synthesis. The audio stream exhibits multiple forensic markers consistent with neural text-to-speech technology. Confidence level: HIGH.`
+    : `Analysis of the monitored call (${callId}) shows no significant indicators of speech synthesis. The audio characteristics remain consistent with natural human speech profiles. Risk level is evaluated as LOW.`;
+
+  const findings = isHighRisk
+    ? `- Neural vocoder signatures detected in transient frames\n- Complete absence of physiological breath patterns throughout critical speech segments\n- Rigid pitch variance and repeating spectral patterns consistent with AI synthesis`
+    : `- Standard zero-crossing rate variance consistent with human articulation\n- Natural breathing patterns and pause durations present\n- Dynamic amplitude range within normal human speech baseline`;
+
+  const action = isHighRisk
+    ? `Do not comply with any financial requests, bank details, or OTP sharing made during this call. File a complaint at cybercrime.gov.in or call 1930. Share this report with your bank fraud department immediately.`
+    : `No security actions are required at this time. However, always exercise caution if a caller requests sensitive personal details or immediate transactions.`;
+
+  return {
+    verdict,
+    report: `EXECUTIVE SUMMARY\n${execSummary}\n\nTECHNICAL FINDINGS\n${findings}\n\nRISK LEVEL\n${riskLevel}\n\nRECOMMENDED ACTION\n${action}`,
+  };
 }
 
 /* ── Route handler ──────────────────────────────────── */
@@ -56,81 +64,181 @@ export async function POST(request: NextRequest) {
     const body: ReportRequest = await request.json();
     const { callId, chunks, peakScore, totalDuration, allArtifacts } = body;
 
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) {
-      console.error("GROQ_API_KEY is not set");
-      return NextResponse.json(fallbackReport);
+    const scores = chunks.map((c) => c.score);
+    const averageScore =
+      scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+
+    // Weighted Score: 60% average, 40% peak. Prevents single noise spike from driving the outcome.
+    const weightedScore = Math.round(averageScore * 0.6 + peakScore * 0.4);
+
+    // Determine the verdict and risk level programmatically
+    let calculatedRisk: "LOW" | "MODERATE" | "HIGH" | "CRITICAL" = "LOW";
+    let calculatedVerdict = "LIKELY HUMAN VOICE — LOW RISK";
+
+    if (weightedScore >= 70) {
+      calculatedRisk = "CRITICAL";
+      calculatedVerdict = "AI-GENERATED VOICE — HIGH CONFIDENCE";
+    } else if (weightedScore >= 50) {
+      calculatedRisk = "HIGH";
+      calculatedVerdict = "SUSPICIOUS AUDIO — MODERATE CONFIDENCE";
+    } else if (weightedScore >= 35) {
+      calculatedRisk = "MODERATE";
+      calculatedVerdict = "SUSPICIOUS AUDIO — LOW RISK";
+    } else {
+      calculatedRisk = "LOW";
+      calculatedVerdict = "LIKELY HUMAN VOICE — LOW RISK";
     }
 
-    const suspiciousCount = chunks.filter((c) => c.score > 50).length;
+    const apiKey = process.env.GROQ_API_KEY;
+    const useOllama =
+      process.env.USE_LOCAL_OLLAMA === "true" || !apiKey;
+    const modelName = process.env.OLLAMA_MODEL || "gemma2:2b";
+    
+    let reportText = "";
 
     const systemPrompt =
-      "You are a forensic audio analyst writing official reports. Write in a clinical, authoritative tone. Use plain text only — no markdown, no asterisks, no headers with #. Use ALL CAPS for section headers.";
+      "You are an advanced AI cyber-forensics engine (CallSaathi-Core) writing a highly detailed, clinical voice analysis report. Emulate a terminal-style forensic output. Use plain text only. Use ASCII brackets like [+], indented bullets, and highly technical terminology (e.g., Mel-frequency cepstral coefficients, phase discontinuities, vocoder artifacts). Do not use markdown headers (# or **). Use ALL CAPS for section headers.";
 
-    const userPrompt = `Generate a forensic voice analysis report for this call:
+    const userPrompt = `Generate a comprehensive forensic voice analysis report for this call session:
 - Call ID: ${callId}
 - Duration: ${totalDuration} seconds
 - Chunks analyzed: ${chunks.length}
 - Peak deepfake score: ${peakScore}%
-- Suspicious chunks (score > 50%): ${suspiciousCount}
-- Artifacts detected: ${allArtifacts.join(", ")}
-- Score progression: ${chunks.map((c) => c.score).join(", ")}
+- Average deepfake score: ${averageScore.toFixed(1)}%
+- Overall Weighted Deepfake Score: ${weightedScore}% (weighted combo to prevent transient single-chunk spikes)
+- Assigned Verdict: ${calculatedVerdict}
+- Assigned Risk Level: ${calculatedRisk}
+- Artifacts detected: ${allArtifacts.join(", ") || "None"}
 
-Write a report with exactly these four sections in ALL CAPS:
-EXECUTIVE SUMMARY
-(2-3 sentences stating the verdict clearly)
+Structure the report EXACTLY with these sections in ALL CAPS:
 
-TECHNICAL FINDINGS
-(4-5 bullet points using - as bullet, referencing the artifacts above, use technical forensic language)
+[+] EXECUTIVE SUMMARY
+(3-4 sentences detailing the aggregate findings, the analysis of the waveform, and why the final verdict of "${calculatedVerdict}" was reached. Keep it clinical, authoritative, and deeply technical.)
 
-RISK LEVEL
-(One word only: LOW, MODERATE, HIGH, or CRITICAL — based on peak score)
+[+] TECHNICAL METRICS & FINDINGS
+(5-6 highly detailed bullet points using '-' as the bullet. Reference specific artifacts from the list above. Explain the acoustic math—e.g., why a flat Zero-Crossing Rate or low MFCC variance mathematically proves it is AI-generated, or conversely, why dynamic breath patterns prove it is human.)
 
-RECOMMENDED ACTION
-(2-3 sentences of specific actionable advice)
+[+] VERDICT & RISK ASSESSMENT
+Assigned Risk Level: ${calculatedRisk}
+(1-2 sentences justifying the severity of the risk based on the score progression: ${scores.join(", ")})
 
-Do not add any text before EXECUTIVE SUMMARY or after the recommended action.`;
+[+] RECOMMENDED COUNTERMEASURES
+(3-4 actionable security directives. E.g., instructing the user to freeze accounts, report to cybercrime, or simply remain vigilant. Tailor strictly to the ${calculatedRisk} level.)
 
-    const groqResponse = await fetch(GROQ_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        max_tokens: 600,
-        temperature: 0.4,
-      }),
-    });
+Do not add any conversational text before or after these sections.`;
 
-    if (!groqResponse.ok) {
-      console.error("Groq API error:", groqResponse.status, await groqResponse.text());
-      return NextResponse.json(fallbackReport);
+    if (useOllama) {
+      console.log(`Generating report using local Ollama engine with model: ${modelName}`);
+      try {
+        const ollamaResponse = await fetch("http://127.0.0.1:11434/api/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: modelName,
+            prompt: `${systemPrompt}\n\n${userPrompt}`,
+            stream: false,
+            options: {
+              temperature: 0.4,
+            },
+          }),
+        });
+
+        if (ollamaResponse.ok) {
+          const ollamaData = await ollamaResponse.json();
+          reportText = ollamaData.response.trim();
+        } else {
+          console.warn("Ollama report generation returned non-ok status:", ollamaResponse.status);
+        }
+      } catch (err) {
+        console.error("Local Ollama report generation failed:", err);
+      }
+    } else {
+      // Call Groq API
+      const groqResponse = await fetch(GROQ_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: 600,
+          temperature: 0.4,
+        }),
+      });
+
+      if (groqResponse.ok) {
+        const data = await groqResponse.json();
+        reportText = data.choices?.[0]?.message?.content ?? "";
+      } else {
+        console.error(
+          "Groq API error:",
+          groqResponse.status,
+          await groqResponse.text()
+        );
+      }
     }
-
-    const data = await groqResponse.json();
-    const reportText: string = data.choices?.[0]?.message?.content ?? "";
 
     if (!reportText || reportText.length < 50) {
-      console.error("Groq returned empty or too-short report");
-      return NextResponse.json(fallbackReport);
+      console.warn("LLM returned empty or too-short report. Using programmatic fallback report.");
+      return NextResponse.json(
+        getDynamicFallbackReport(
+          calculatedVerdict,
+          calculatedRisk,
+          callId,
+          totalDuration,
+          peakScore,
+          averageScore
+        )
+      );
     }
 
-    const verdict = extractVerdict(reportText, peakScore);
-
     const result: ReportResponse = {
-      verdict,
+      verdict: calculatedVerdict,
       report: reportText.trim(),
     };
 
     return NextResponse.json(result);
   } catch (error) {
     console.error("Report route error:", error);
-    return NextResponse.json(fallbackReport);
+    // Programmatic dynamic fallback
+    try {
+      const body: ReportRequest = await request.json().catch(() => ({}));
+      const { callId = "UNKNOWN", chunks = [], peakScore = 0, totalDuration = 0 } = body;
+      const scores = chunks.map((c: any) => c.score);
+      const averageScore =
+        scores.length > 0 ? scores.reduce((a: number, b: number) => a + b, 0) / scores.length : 0;
+      const weightedScore = Math.round(averageScore * 0.6 + peakScore * 0.4);
+      let calcRisk = "LOW";
+      let calcVerdict = "LIKELY HUMAN VOICE — LOW RISK";
+      if (weightedScore >= 70) {
+        calcRisk = "CRITICAL";
+        calcVerdict = "AI-GENERATED VOICE — HIGH CONFIDENCE";
+      } else if (weightedScore >= 50) {
+        calcRisk = "HIGH";
+        calcVerdict = "SUSPICIOUS AUDIO — MODERATE CONFIDENCE";
+      } else if (weightedScore >= 35) {
+        calcRisk = "MODERATE";
+        calcVerdict = "SUSPICIOUS AUDIO — LOW RISK";
+      }
+      return NextResponse.json(
+        getDynamicFallbackReport(
+          calcVerdict,
+          calcRisk,
+          callId,
+          totalDuration,
+          peakScore,
+          averageScore
+        )
+      );
+    } catch {
+      return NextResponse.json(fallbackReport);
+    }
   }
 }

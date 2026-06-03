@@ -48,6 +48,7 @@ function MonitorContent() {
 
   /* ── Live mode state ────────────────────────────── */
   const [liveScore, setLiveScore] = useState(0);
+  const liveScoreRef = useRef(0);
   const [liveRisk, setLiveRisk] = useState<RiskLevel>("safe");
   const [liveArtifacts, setLiveArtifacts] = useState<ArtifactEntry[]>([]);
   const [liveAllArtifacts, setLiveAllArtifacts] = useState<string[]>([]);
@@ -74,19 +75,49 @@ function MonitorContent() {
 
     if (isSilent) {
       // User is silent: decay score slightly, don't advance the fake detection arc
-      setLiveScore((prevScore) => {
-        const newScore = Math.max(prevScore - 2, 0);
-        if (newScore < 50) setLiveRisk("safe");
-        else if (newScore < 70) setLiveRisk("suspicious");
-        
-        setLiveChartData((chart) => [...chart, { time: currentTime, score: newScore }]);
-        return newScore;
-      });
+      const prevScore = liveScoreRef.current;
+      const newScore = Math.max(prevScore - 2, 0);
+      liveScoreRef.current = newScore;
+
+      setLiveScore(newScore);
+      if (newScore < 50) setLiveRisk("safe");
+      else if (newScore < 70) setLiveRisk("suspicious");
+      
+      setLiveChartData((chart) => [...chart, { time: currentTime, score: newScore }]);
       return;
     }
 
     chunkCountRef.current += 1;
     const chunkNum = chunkCountRef.current;
+
+    // First chunk calibration period to ignore mouse clicks and microphone startup static
+    if (chunkNum === 1) {
+      const s = 12;
+      const r = "safe" as RiskLevel;
+      const a = [
+        "Calibrating audio sensors...",
+        "Establishing background noise floor baseline...",
+      ];
+
+      setLiveScore(s);
+      setLiveRisk(r);
+      setLiveChartData((prev) => [...prev, { time: currentTime, score: s }]);
+      setLiveChunks((prev) => [
+        ...prev,
+        {
+          chunkNumber: chunkNum,
+          score: s,
+          artifacts: a,
+          features,
+          detectionMethod: "calibration",
+        },
+      ]);
+      setLiveArtifacts((prev) => [
+        ...prev,
+        ...a.map((text) => ({ text, time: currentTime, riskLevel: r })),
+      ]);
+      return;
+    }
 
     try {
       let analysisResult;
@@ -129,6 +160,7 @@ function MonitorContent() {
         artifacts: string[];
       };
 
+      liveScoreRef.current = s;
       setLiveScore(s);
       setLiveRisk(r);
 
@@ -207,37 +239,76 @@ function MonitorContent() {
   /* ── End Call handler ───────────────────────────── */
 
   const handleEndCall = useCallback(() => {
-    // Stop everything
-    if (mode === "demo") {
-      sim.stop();
-    } else {
-      audioCapture.stopListening();
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    try {
+      console.log("Ending call. Chunks count:", chunks?.length ?? 0);
+      
+      // 1. Safely stop capturing and timers
+      try {
+        if (mode === "demo") {
+          sim.stop();
+        } else {
+          audioCapture.stopListening();
+          if (timerIntervalRef.current) {
+            clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = null;
+          }
+        }
+      } catch (err) {
+        console.error("Error stopping capture/simulation resources:", err);
+      }
+
+      // 2. Calculate peak and weighted score safely
+      let peakScore = 0;
+      let weightedScore = 0;
+      const safeChunks = chunks || [];
+
+      if (safeChunks.length > 0) {
+        const scores = safeChunks.map((c) => c?.score ?? 0);
+        peakScore = Math.max(...scores, 0);
+        const averageScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+        weightedScore = Math.round(averageScore * 0.6 + peakScore * 0.4);
+      }
+
+      // 3. Build a completely sanitised callData payload
+      const callData = {
+        callId: callIdRef.current || `CS-${Date.now()}`,
+        chunks: safeChunks.map((c, idx) => ({
+          chunkNumber: c?.chunkNumber ?? (idx + 1),
+          score: c?.score ?? 0,
+          artifacts: c?.artifacts ?? [],
+          riskLevel:
+            (c?.score ?? 0) > 70
+              ? "danger"
+              : (c?.score ?? 0) > 35
+                ? "suspicious"
+                : "safe",
+          features: c?.features,
+        })),
+        peakScore,
+        weightedScore,
+        totalDuration: elapsed || 0,
+        allArtifacts: [...new Set(allArtifacts || [])],
+        detectionMethods: [
+          ...new Set(
+            safeChunks.map(
+              (c) =>
+                c?.detectionMethod || (mode === "demo" ? "demo" : "groq")
+            )
+          ),
+        ],
+      };
+
+      console.log("Saving call data to localStorage:", callData);
+      localStorage.setItem("callsaathi_call_data", JSON.stringify(callData));
+
+      // 4. Navigate to report page
+      console.log("Navigating to /report");
+      router.push("/report");
+    } catch (error) {
+      console.error("Critical error in handleEndCall, forcing fallback navigation:", error);
+      // Fail-safe navigation so user is never stuck
+      router.push("/report");
     }
-
-    // Calculate peak score
-    const peakScore = Math.max(...chunks.map((c) => c.score), 0);
-
-    // Save to localStorage
-    const callData = {
-      callId: callIdRef.current,
-      chunks: chunks.map((c) => ({
-        chunkNumber: c.chunkNumber,
-        score: c.score,
-        artifacts: c.artifacts,
-        riskLevel: c.score > 70 ? "danger" : c.score > 35 ? "suspicious" : "safe",
-        features: c.features,
-      })),
-      peakScore,
-      totalDuration: elapsed,
-      allArtifacts: [...new Set(allArtifacts)],
-      detectionMethods: [...new Set(chunks.map((c) => c.detectionMethod || (mode === "demo" ? "demo" : "groq")))],
-    };
-
-    localStorage.setItem("callsaathi_call_data", JSON.stringify(callData));
-
-    // Navigate to report
-    router.push("/report");
   }, [mode, sim, audioCapture, chunks, elapsed, allArtifacts, router]);
 
   /* ── Render ─────────────────────────────────────── */

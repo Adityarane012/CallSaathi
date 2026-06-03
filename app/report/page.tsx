@@ -139,6 +139,11 @@ export default function ReportPage() {
   if (callData && reportResult) {
     const suspiciousChunksCount = callData.chunks.filter(c => c.score > 50).length;
     
+    const scores = callData.chunks.map(c => c.score);
+    const averageScore =
+      scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+    const weightedScore = Math.round(averageScore * 0.6 + callData.peakScore * 0.4);
+    
     return (
       <main className="min-h-screen p-4 md:p-8 bg-[var(--bg-primary)]">
         {/* Animated grid bg */}
@@ -152,6 +157,7 @@ export default function ReportPage() {
                 totalDuration: callData.totalDuration,
                 chunksAnalyzed: callData.chunks.length,
                 peakScore: callData.peakScore,
+                weightedScore,
                 suspiciousChunks: suspiciousChunksCount,
                 uniqueArtifacts: callData.allArtifacts.length,
                 verdict: reportResult.verdict,

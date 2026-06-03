@@ -11,7 +11,7 @@ export const detectWithHuggingFace = async (
     formData.append('data', audioBlob)
 
     const response = await fetch(
-      'https://api-inference.huggingface.co/models/mo-tts/audio-deepfake-detection',
+      'https://api-inference.huggingface.co/models/garystafford/wav2vec2-deepfake-voice-detector',
       {
         headers: { Authorization: `Bearer ${process.env.HF_API_TOKEN}` },
         method: 'POST',

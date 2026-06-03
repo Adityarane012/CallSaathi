@@ -44,7 +44,9 @@ export function useAudioCapture(
   const recorderRef = useRef<MediaRecorder | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const onChunkRef = useRef(onChunk);
-  onChunkRef.current = onChunk;
+  useEffect(() => {
+    onChunkRef.current = onChunk;
+  }, [onChunk]);
 
   /* ── Start ────────────────────────────────────────── */
 
@@ -67,6 +69,9 @@ export function useAudioCapture(
 
       // 2. Set up Web Audio API for AnalyserNode
       const audioCtx = new AudioContext();
+      if (audioCtx.state === "suspended") {
+        await audioCtx.resume();
+      }
       audioCtxRef.current = audioCtx;
 
       const source = audioCtx.createMediaStreamSource(stream);

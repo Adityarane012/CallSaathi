@@ -23,8 +23,7 @@ export async function POST(request: NextRequest) {
     const body: AnalyzeRequest = await request.json()
     const { callId, chunkNumber, duration, features } = body
 
-    // Build the prompt that includes REAL audio feature analysis
-    const systemPrompt = `You are a forensic audio deepfake detection engine. You analyze real audio signal features and return ONLY valid JSON with no markdown, no backticks. Return exactly this structure: { "score": number (0-100), "confidence": string, "artifacts": array of strings, "riskLevel": string }`
+    // Build prompt variables dynamically based on model engine path
 
     const analysisContext = `
 REAL AUDIO FEATURES EXTRACTED FROM THIS CHUNK:
@@ -58,56 +57,159 @@ Danger artifacts: "Neural vocoder signature (low ZCR + flat MFCC)", "Synthetic b
 
 Return ONLY valid JSON. No markdown. No backticks. No explanation.`
 
-    const userPrompt = analysisContext + `\n\nAnalyze these features and return the deepfake probability score and risk level.`
+    // User prompt and system prompt are evaluated conditionally below
 
-    // Call Groq API
-    const groqResponse = await fetch(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
-          ],
-          max_tokens: 200,
-          temperature: 0.3,
-        }),
+    const useOllama =
+      process.env.USE_LOCAL_OLLAMA === "true" || !process.env.GROQ_API_KEY;
+    const modelName = process.env.OLLAMA_MODEL || "gemma2:2b";
+    let responseText = "";
+
+    // 1. System Prompt
+    const systemPrompt = useOllama
+      ? `You are an audio deepfake sensor. Return ONLY valid JSON: { "score": number(0-100), "confidence": "low"|"medium"|"high", "artifacts": string[], "riskLevel": "safe"|"suspicious"|"danger" }`
+      : `You are a forensic audio deepfake detection engine. You analyze real audio signal features and return ONLY valid JSON with no markdown, no backticks. Return exactly this structure: { "score": number (0-100), "confidence": string, "artifacts": array of strings, "riskLevel": string }`;
+
+    // 2. User Prompt
+    const userPrompt = useOllama
+      ? `Analyze raw features:
+- RMS: ${features.rms.toFixed(4)} (human: 0.01-0.1)
+- ZCR: ${features.zcr.toFixed(4)} (human: 0.04-0.12, synthetic: <0.03)
+- Peak: ${features.peak.toFixed(4)}
+- SilenceRatio: ${features.silenceRatio.toFixed(4)} (human: 0.1-0.3, synthetic: <0.1)
+- Centroid: ${features.spectralCentroid.toFixed(4)}
+- MFCC Var: ${features.mfccVariance.toFixed(4)} (human: >1.2, synthetic: <0.8)
+
+Is this synthetic or natural? Output JSON.`
+      : analysisContext + `\n\nAnalyze these features and return the deepfake probability score and risk level.`;
+
+    if (useOllama) {
+      console.log(`Using local Ollama engine with model: ${modelName} (optimized path)`);
+      let succeeded = false;
+      
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000); // 3-second maximum latency cap
+
+        const ollamaResponse = await fetch("http://127.0.0.1:11434/api/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: modelName,
+            prompt: `${systemPrompt}\n\n${userPrompt}`,
+            format: "json",
+            stream: false,
+            options: {
+              temperature: 0.2,
+              num_predict: 80,
+            },
+          }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (ollamaResponse.ok) {
+          const ollamaData = await ollamaResponse.json();
+          responseText = ollamaData.response.trim();
+          succeeded = true;
+        } else {
+          console.warn(`Ollama returned status ${ollamaResponse.status}. Falling back to Groq.`);
+        }
+      } catch (err: any) {
+        if (err.name === "AbortError") {
+          console.warn("Ollama CPU inference took too long (>3s). Falling back to ultra-fast Groq API.");
+        } else {
+          console.error("Local Ollama analysis failed:", err.message);
+        }
       }
-    )
 
-    if (!groqResponse.ok) {
-      throw new Error(`Groq API error: ${groqResponse.statusText}`)
+      // If local Ollama failed or timed out, and we have a Groq Key, fall back immediately
+      if (!succeeded && process.env.GROQ_API_KEY) {
+        console.log("Routing fallback request to Groq LPU Cloud...");
+        const fallbackSystemPrompt = `You are a forensic audio deepfake detection engine. You analyze real audio signal features and return ONLY valid JSON with no markdown, no backticks. Return exactly this structure: { "score": number (0-100), "confidence": string, "artifacts": array of strings, "riskLevel": string }`;
+        const fallbackUserPrompt = analysisContext + `\n\nAnalyze these features and return the deepfake probability score and risk level.`;
+        
+        const groqResponse = await fetch(
+          "https://api.groq.com/openai/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+            },
+            body: JSON.stringify({
+              model: "llama-3.3-70b-versatile",
+              messages: [
+                { role: "system", content: fallbackSystemPrompt },
+                { role: "user", content: fallbackUserPrompt },
+              ],
+              max_tokens: 200,
+              temperature: 0.3,
+            }),
+          }
+        );
+
+        if (groqResponse.ok) {
+          const groqData = await groqResponse.json();
+          responseText = groqData.choices[0].message.content.trim();
+        } else {
+          throw new Error(`Groq API fallback failed: ${groqResponse.statusText}`);
+        }
+      } else if (!succeeded) {
+        throw new Error("Local Ollama timed out and no Groq API Key was available for fallback.");
+      }
+    } else {
+      // Call Groq API
+      const groqResponse = await fetch(
+        "https://api.groq.com/openai/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: "llama-3.3-70b-versatile",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt },
+            ],
+            max_tokens: 200,
+            temperature: 0.3,
+          }),
+        }
+      );
+
+      if (!groqResponse.ok) {
+        throw new Error(`Groq API error: ${groqResponse.statusText}`);
+      }
+
+      const groqData = await groqResponse.json();
+      responseText = groqData.choices[0].message.content.trim();
     }
-
-    const groqData = await groqResponse.json()
-    let responseText = groqData.choices[0].message.content.trim()
 
     // Strip markdown backticks if present
     responseText = responseText
-      .replace(/^```json\n?/g, '')
-      .replace(/\n?```$/g, '')
-      .trim()
+      .replace(/^```json\n?/g, "")
+      .replace(/\n?```$/g, "")
+      .trim();
 
     // Parse JSON
-    const analysis = JSON.parse(responseText)
+    const analysis = JSON.parse(responseText);
 
     // Validate response structure
     if (
-      typeof analysis.score !== 'number' ||
+      typeof analysis.score !== "number" ||
       !analysis.confidence ||
       !Array.isArray(analysis.artifacts) ||
       !analysis.riskLevel
     ) {
-      throw new Error('Invalid response structure from Groq')
+      throw new Error("Invalid response structure from LLM");
     }
 
-    return NextResponse.json(analysis)
+    return NextResponse.json(analysis);
   } catch (error) {
     console.error('Analysis error:', error)
 

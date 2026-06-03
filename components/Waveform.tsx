@@ -71,131 +71,125 @@ export default function Waveform({
   className = "",
 }: WaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef<number>(0);
   const timeRef = useRef(0);
   const currentColorRef = useRef<[number, number, number]>(
     hexToRgb(RISK_COLORS.safe)
   );
-  const currentGlowRef = useRef<[number, number, number]>(
-    hexToRgb(RISK_GLOW.safe.replace(/rgba?\(|\)/g, "").split(",").length > 0
-      ? RISK_COLORS.safe
-      : RISK_COLORS.safe)
-  );
 
-  /* ── Draw frame ───────────────────────────────────── */
-
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-
-    // Resize canvas to match display size (retina aware)
-    if (
-      canvas.width !== rect.width * dpr ||
-      canvas.height !== rect.height * dpr
-    ) {
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      ctx.scale(dpr, dpr);
-    }
-
-    const W = rect.width;
-    const H = rect.height;
-
-    // Lerp color toward target
-    const targetColor = hexToRgb(RISK_COLORS[riskLevel]);
-    currentColorRef.current = lerpColor(
-      currentColorRef.current,
-      targetColor,
-      COLOR_LERP_SPEED
-    );
-    const color = currentColorRef.current;
-
-    // Clear
-    ctx.clearRect(0, 0, W, H);
-
-    const barWidth = (W - (BAR_COUNT - 1) * BAR_GAP) / BAR_COUNT;
-
-    if (analyserNode) {
-      /* ── Live mode: real frequency data ─────────── */
-      const bufferLength = analyserNode.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      analyserNode.getByteFrequencyData(dataArray);
-
-      // Map frequency bins to our bar count
-      const step = Math.floor(bufferLength / BAR_COUNT);
-
-      for (let i = 0; i < BAR_COUNT; i++) {
-        // Average a few bins for each bar
-        let sum = 0;
-        for (let j = 0; j < step; j++) {
-          sum += dataArray[i * step + j] || 0;
-        }
-        const avg = sum / step;
-        const normalised = avg / 255;
-
-        // Bar height: min 2px, max 90% of canvas
-        const barH = Math.max(2, normalised * H * 0.9);
-        const x = i * (barWidth + BAR_GAP);
-        const y = (H - barH) / 2;
-
-        // Gradient per bar
-        const grad = ctx.createLinearGradient(x, y, x, y + barH);
-        grad.addColorStop(0, rgbToString(color, 0.9));
-        grad.addColorStop(0.5, rgbToString(color, 1));
-        grad.addColorStop(1, rgbToString(color, 0.9));
-
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.roundRect(x, y, barWidth, barH, 1.5);
-        ctx.fill();
-      }
-
-      // Subtle glow reflection at center line
-      ctx.save();
-      ctx.globalAlpha = 0.12;
-      ctx.fillStyle = rgbToString(color);
-      ctx.fillRect(0, H / 2 - 0.5, W, 1);
-      ctx.restore();
-    } else {
-      /* ── Idle mode: gentle sine wave ────────────── */
-      timeRef.current += IDLE_WAVE_SPEED;
-
-      for (let i = 0; i < BAR_COUNT; i++) {
-        const phase = (i / BAR_COUNT) * Math.PI * 4 + timeRef.current;
-        const sine = Math.sin(phase);
-        const barH = Math.max(2, Math.abs(sine) * IDLE_AMPLITUDE + 2);
-        const x = i * (barWidth + BAR_GAP);
-        const y = (H - barH) / 2;
-
-        ctx.fillStyle = rgbToString(color, 0.25 + Math.abs(sine) * 0.35);
-        ctx.beginPath();
-        ctx.roundRect(x, y, barWidth, barH, 1);
-        ctx.fill();
-      }
-
-      // Faint center line
-      ctx.save();
-      ctx.globalAlpha = 0.06;
-      ctx.fillStyle = rgbToString(color);
-      ctx.fillRect(0, H / 2 - 0.5, W, 1);
-      ctx.restore();
-    }
-
-    rafRef.current = requestAnimationFrame(draw);
-  }, [analyserNode, riskLevel]);
-
-  /* ── Lifecycle ────────────────────────────────────── */
+  /* ── Draw loop ────────────────────────────────────── */
 
   useEffect(() => {
-    rafRef.current = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [draw]);
+    let animationId: number;
+    
+    const renderFrame = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+
+      // Resize canvas to match display size (retina aware)
+      if (
+        canvas.width !== rect.width * dpr ||
+        canvas.height !== rect.height * dpr
+      ) {
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+      }
+
+      const W = rect.width;
+      const H = rect.height;
+
+      // Lerp color toward target
+      const targetColor = hexToRgb(RISK_COLORS[riskLevel]);
+      currentColorRef.current = lerpColor(
+        currentColorRef.current,
+        targetColor,
+        COLOR_LERP_SPEED
+      );
+      const color = currentColorRef.current;
+
+      // Clear
+      ctx.clearRect(0, 0, W, H);
+
+      const barWidth = (W - (BAR_COUNT - 1) * BAR_GAP) / BAR_COUNT;
+
+      if (analyserNode) {
+        /* ── Live mode: real frequency data ─────────── */
+        const bufferLength = analyserNode.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        analyserNode.getByteFrequencyData(dataArray);
+
+        // Map frequency bins to our bar count
+        const step = Math.floor(bufferLength / BAR_COUNT);
+
+        for (let i = 0; i < BAR_COUNT; i++) {
+          // Average a few bins for each bar
+          let sum = 0;
+          for (let j = 0; j < step; j++) {
+            sum += dataArray[i * step + j] || 0;
+          }
+          const avg = sum / step;
+          const normalised = avg / 255;
+
+          // Bar height: min 2px, max 90% of canvas
+          const barH = Math.max(2, normalised * H * 0.9);
+          const x = i * (barWidth + BAR_GAP);
+          const y = (H - barH) / 2;
+
+          // Gradient per bar
+          const grad = ctx.createLinearGradient(x, y, x, y + barH);
+          grad.addColorStop(0, rgbToString(color, 0.9));
+          grad.addColorStop(0.5, rgbToString(color, 1));
+          grad.addColorStop(1, rgbToString(color, 0.9));
+
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.roundRect(x, y, barWidth, barH, 1.5);
+          ctx.fill();
+        }
+
+        // Subtle glow reflection at center line
+        ctx.save();
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = rgbToString(color);
+        ctx.fillRect(0, H / 2 - 0.5, W, 1);
+        ctx.restore();
+      } else {
+        /* ── Idle mode: gentle sine wave ────────────── */
+        timeRef.current += IDLE_WAVE_SPEED;
+
+        for (let i = 0; i < BAR_COUNT; i++) {
+          const phase = (i / BAR_COUNT) * Math.PI * 4 + timeRef.current;
+          const sine = Math.sin(phase);
+          const barH = Math.max(2, Math.abs(sine) * IDLE_AMPLITUDE + 2);
+          const x = i * (barWidth + BAR_GAP);
+          const y = (H - barH) / 2;
+
+          ctx.fillStyle = rgbToString(color, 0.25 + Math.abs(sine) * 0.35);
+          ctx.beginPath();
+          ctx.roundRect(x, y, barWidth, barH, 1);
+          ctx.fill();
+        }
+
+        // Faint center line
+        ctx.save();
+        ctx.globalAlpha = 0.06;
+        ctx.fillStyle = rgbToString(color);
+        ctx.fillRect(0, H / 2 - 0.5, W, 1);
+        ctx.restore();
+      }
+
+      animationId = requestAnimationFrame(renderFrame);
+    };
+
+    animationId = requestAnimationFrame(renderFrame);
+    return () => cancelAnimationFrame(animationId);
+  }, [analyserNode, riskLevel]);
 
   /* ── Render ───────────────────────────────────────── */
 
@@ -213,7 +207,7 @@ export default function Waveform({
         className="absolute inset-x-0 bottom-0 h-8 pointer-events-none"
         style={{
           background: `linear-gradient(to top, ${rgbToString(
-            currentColorRef.current,
+            hexToRgb(RISK_COLORS[riskLevel]),
             0.06
           )}, transparent)`,
         }}

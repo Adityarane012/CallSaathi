@@ -141,24 +141,12 @@ export default function Waveform({
           const x = i * (barWidth + BAR_GAP);
           const y = (H - barH) / 2;
 
-          // Gradient per bar
-          const grad = ctx.createLinearGradient(x, y, x, y + barH);
-          grad.addColorStop(0, rgbToString(color, 0.9));
-          grad.addColorStop(0.5, rgbToString(color, 1));
-          grad.addColorStop(1, rgbToString(color, 0.9));
-
-          ctx.fillStyle = grad;
+          // Flat solid color per bar
+          ctx.fillStyle = rgbToString(color, 1);
           ctx.beginPath();
           ctx.roundRect(x, y, barWidth, barH, 1.5);
           ctx.fill();
         }
-
-        // Subtle glow reflection at center line
-        ctx.save();
-        ctx.globalAlpha = 0.12;
-        ctx.fillStyle = rgbToString(color);
-        ctx.fillRect(0, H / 2 - 0.5, W, 1);
-        ctx.restore();
       } else {
         /* ── Idle mode: gentle sine wave ────────────── */
         timeRef.current += IDLE_WAVE_SPEED;
@@ -170,18 +158,11 @@ export default function Waveform({
           const x = i * (barWidth + BAR_GAP);
           const y = (H - barH) / 2;
 
-          ctx.fillStyle = rgbToString(color, 0.25 + Math.abs(sine) * 0.35);
+          ctx.fillStyle = rgbToString(color, 0.6);
           ctx.beginPath();
           ctx.roundRect(x, y, barWidth, barH, 1);
           ctx.fill();
         }
-
-        // Faint center line
-        ctx.save();
-        ctx.globalAlpha = 0.06;
-        ctx.fillStyle = rgbToString(color);
-        ctx.fillRect(0, H / 2 - 0.5, W, 1);
-        ctx.restore();
       }
 
       animationId = requestAnimationFrame(renderFrame);
@@ -198,21 +179,10 @@ export default function Waveform({
       className={`relative w-full overflow-hidden rounded-xl ${className}`}
       style={{
         height: CANVAS_HEIGHT,
-        background: "rgba(10, 10, 15, 0.6)",
+        background: "var(--bg-secondary)",
         border: "1px solid var(--border)",
       }}
     >
-      {/* Glow overlay at the bottom */}
-      <div
-        className="absolute inset-x-0 bottom-0 h-8 pointer-events-none"
-        style={{
-          background: `linear-gradient(to top, ${rgbToString(
-            hexToRgb(RISK_COLORS[riskLevel]),
-            0.06
-          )}, transparent)`,
-        }}
-      />
-
       <canvas
         ref={canvasRef}
         className="w-full h-full"

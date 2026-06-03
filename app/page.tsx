@@ -57,9 +57,8 @@ const stats = [
 export default function LandingPage() {
   return (
     <main className="relative min-h-screen flex flex-col">
-      {/* Animated background layers */}
-      <div className="animated-grid-bg" />
-      <div className="scan-line" />
+      {/* Clean background layer */}
+      <div className="absolute inset-0 bg-[var(--bg-primary)] z-0" />
 
       {/* Content wrapper */}
       <div className="relative z-10 flex flex-col min-h-screen">
@@ -155,17 +154,10 @@ export default function LandingPage() {
           >
             Is that voice{" "}
             <span
-              className="relative inline-block"
+              className="relative inline-block px-2"
               style={{ color: "var(--state-safe)" }}
             >
               real
-              <span
-                className="absolute -bottom-1 left-0 w-full h-0.5 rounded-full"
-                style={{
-                  background:
-                    "linear-gradient(90deg, var(--state-safe), transparent)",
-                }}
-              />
             </span>
             ?
           </motion.h1>
@@ -225,27 +217,7 @@ export default function LandingPage() {
             </Link>
           </motion.div>
 
-          {/* Decorative element — glowing orb */}
-          <motion.div
-            variants={itemVariants}
-            className="relative mt-16 mb-4 flex items-center justify-center"
-          >
-            <div
-              className="w-24 h-24 rounded-full"
-              style={{
-                background:
-                  "radial-gradient(circle, rgba(0,255,136,0.12) 0%, transparent 70%)",
-                animation: "glowPulse 3s ease-in-out infinite",
-              }}
-            />
-            <div
-              className="absolute w-3 h-3 rounded-full"
-              style={{
-                background: "var(--state-safe)",
-                boxShadow: "0 0 20px rgba(0,255,136,0.5), 0 0 60px rgba(0,255,136,0.2)",
-              }}
-            />
-          </motion.div>
+
         </motion.section>
 
         {/* ── Divider ──────────────────────────────── */}

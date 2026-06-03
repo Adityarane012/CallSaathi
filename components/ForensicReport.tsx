@@ -118,7 +118,6 @@ export default function ForensicReport({ reportData }: ForensicReportProps) {
               background: `${badgeColor}20`,
               border: `1px solid ${badgeColor}50`,
               color: badgeColor,
-              boxShadow: `0 0 20px ${badgeColor}20`,
             }}
           >
             VERDICT: {reportData.verdict}
@@ -140,7 +139,7 @@ export default function ForensicReport({ reportData }: ForensicReportProps) {
         <div
           className="flex flex-wrap items-center justify-center gap-6 p-4 rounded-lg mb-8"
           style={{
-            background: "rgba(10, 10, 15, 0.5)",
+            background: "var(--bg-secondary)",
             border: "1px dashed var(--border)",
             fontFamily: "var(--font-jetbrains), monospace",
             color: "var(--text-secondary)",

@@ -26,11 +26,7 @@ const RISK_LABELS: Record<RiskLevel, string> = {
   danger: "DANGER",
 };
 
-const RISK_GLOW: Record<RiskLevel, string> = {
-  safe: "drop-shadow(0 0 8px rgba(0,255,136,0.5))",
-  suspicious: "drop-shadow(0 0 8px rgba(255,170,0,0.5))",
-  danger: "drop-shadow(0 0 12px rgba(255,34,68,0.6))",
-};
+
 
 /* ── Arc geometry ───────────────────────────────────── */
 
@@ -70,7 +66,6 @@ function describeArc(
 export default function ScoreMeter({ score, riskLevel }: ScoreMeterProps) {
   const color = RISK_COLORS[riskLevel];
   const label = RISK_LABELS[riskLevel];
-  const glow = RISK_GLOW[riskLevel];
 
   // Spring-animated score value
   const springValue = useSpring(0, {
@@ -99,7 +94,6 @@ export default function ScoreMeter({ score, riskLevel }: ScoreMeterProps) {
         width={SIZE}
         height={SIZE}
         viewBox={`0 0 ${SIZE} ${SIZE}`}
-        style={{ filter: glow }}
       >
         {/* Background track */}
         <path
@@ -187,9 +181,6 @@ export default function ScoreMeter({ score, riskLevel }: ScoreMeterProps) {
         }}
         animate={{
           borderColor: `${color}60`,
-          boxShadow: riskLevel === "danger"
-            ? `0 0 16px ${color}30`
-            : `0 0 8px ${color}15`,
         }}
         transition={{ duration: 0.6 }}
       >

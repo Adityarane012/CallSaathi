@@ -57,7 +57,8 @@ function MonitorContent() {
   const [liveElapsed, setLiveElapsed] = useState(0);
 
   const chunkCountRef = useRef(0);
-  const callIdRef = useRef(`CS-${Date.now()}`);
+  const [initialCallId] = useState(() => `CS-${Date.now()}`);
+  const callIdRef = useRef(initialCallId);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   /* ── Live mode: handle audio chunks ───────────────── */

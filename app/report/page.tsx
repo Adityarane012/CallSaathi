@@ -38,6 +38,7 @@ export default function ReportPage() {
     }
     try {
       const parsed = JSON.parse(raw);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       setCallData(parsed);
     } catch (e) {
       console.error("Failed to parse call data", e);
